@@ -1,7 +1,7 @@
 import { buildOpenAIChatCompletion } from '@/lib/llm/providers/openai-compat'
 import { buildReasoningAwareContent } from '@/lib/llm/utils'
 import type { OpenAICompatChatRequest } from '../types'
-import { resolveOpenAICompatClientConfig } from './common'
+import { getOpenAICompatResponsesTimeoutMs, resolveOpenAICompatClientConfig } from './common'
 
 type ResponsesUsage = {
   promptTokens: number
@@ -111,6 +111,7 @@ export async function runOpenAICompatResponsesCompletion(input: OpenAICompatChat
       })),
       temperature: input.temperature,
     }),
+    signal: AbortSignal.timeout(getOpenAICompatResponsesTimeoutMs()),
   })
 
   if (!response.ok) {

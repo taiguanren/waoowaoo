@@ -28,6 +28,25 @@ function resolvePayloadArtStyle(payload: AnyObj): ArtStyleValue | undefined {
   return parsedArtStyle
 }
 
+function enrichCharacterDescription(description: string, profileData: string | null | undefined): string {
+  if (!profileData) return description
+  try {
+    const profile = JSON.parse(profileData) as Record<string, unknown>
+    const facts = [
+      typeof profile.gender === 'string' ? `性别：${profile.gender}` : '',
+      typeof profile.age_range === 'string' ? `年龄：${profile.age_range}` : '',
+      typeof profile.era_period === 'string' ? `时代：${profile.era_period}` : '',
+      typeof profile.primary_identifier === 'string' ? `核心识别标志：${profile.primary_identifier}` : '',
+      Array.isArray(profile.suggested_colors)
+        ? `主色：${profile.suggested_colors.filter((item): item is string => typeof item === 'string').join('、')}`
+        : '',
+    ].filter(Boolean)
+    return facts.length > 0 ? `${description}。角色档案锚点：${facts.join('；')}。` : description
+  } catch {
+    return description
+  }
+}
+
 interface CharacterAppearanceRecord {
   id: string
   characterId: string
@@ -43,12 +62,14 @@ interface CharacterAppearanceRecord {
 interface CharacterAppearanceWithCharacter extends CharacterAppearanceRecord {
   character: {
     name: string
+    profileData?: string | null
   }
 }
 
 interface CharacterRecord {
   id: string
   name: string
+  profileData?: string | null
   appearances: CharacterAppearanceRecord[]
 }
 
@@ -80,6 +101,7 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
   const appearanceId = pickFirstString(job.data.targetId, payload.appearanceId)
   let appearance: CharacterAppearanceRecord | null = null
   let characterName = '角色'
+  let characterProfileData: string | null = null
 
   if (appearanceId) {
     const appearanceWithCharacter = await db.characterAppearance.findUnique({
@@ -89,6 +111,7 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
     if (appearanceWithCharacter) {
       appearance = appearanceWithCharacter
       characterName = appearanceWithCharacter.character.name
+      characterProfileData = appearanceWithCharacter.character.profileData || null
     }
   }
 
@@ -101,6 +124,7 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
     appearance = character?.appearances?.[0] || null
     if (character && appearance) {
       characterName = character.name
+      characterProfileData = character.profileData || null
     }
   }
 
@@ -144,7 +168,10 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
 
   for (let i = 0; i < indexes.length; i++) {
     const index = indexes[i]
-    const raw = baseDescriptions[index] || baseDescriptions[0]
+    const raw = enrichCharacterDescription(
+      baseDescriptions[index] || baseDescriptions[0],
+      characterProfileData,
+    )
     const prompt = artStyle ? `${addCharacterPromptSuffix(raw)}，${artStyle}` : addCharacterPromptSuffix(raw)
 
     await reportTaskProgress(job, 15 + Math.floor((i / Math.max(indexes.length, 1)) * 55), {

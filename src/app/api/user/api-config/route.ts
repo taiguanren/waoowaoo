@@ -136,8 +136,14 @@ interface ApiConfigPutBody {
   models?: unknown
   providers?: unknown
   defaultModels?: unknown
+  modelRenames?: unknown
   capabilityDefaults?: unknown
   workflowConcurrency?: unknown
+}
+
+interface ModelKeyRename {
+  from: string
+  to: string
 }
 
 const DEFAULT_MODEL_FIELDS: DefaultModelField[] = [
@@ -190,6 +196,7 @@ const OPTIONAL_PRICING_PROVIDER_KEYS = new Set([
   'gemini-compatible',
   'bailian',
   'siliconflow',
+  'comfyui',
 ])
 const OFFICIAL_ONLY_PROVIDER_KEYS = new Set(['bailian', 'siliconflow'])
 const RETIRED_PROVIDER_KEYS = new Set(['qwen'])
@@ -1268,6 +1275,44 @@ function normalizeDefaultModelsInput(rawDefaultModels: unknown): DefaultModelsPa
   return normalized
 }
 
+function normalizeModelRenamesInput(rawModelRenames: unknown): ModelKeyRename[] {
+  if (rawModelRenames === undefined) return []
+  if (!Array.isArray(rawModelRenames)) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'MODEL_RENAMES_INVALID',
+      field: 'modelRenames',
+    })
+  }
+
+  const normalized: ModelKeyRename[] = []
+  for (let index = 0; index < rawModelRenames.length; index += 1) {
+    const raw = rawModelRenames[index]
+    if (!isRecord(raw)) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'MODEL_RENAMES_INVALID',
+        field: `modelRenames[${index}]`,
+      })
+    }
+
+    const from = readTrimmedString(raw.from)
+    const to = readTrimmedString(raw.to)
+    const parsedFrom = parseModelKeyStrict(from)
+    const parsedTo = parseModelKeyStrict(to)
+    if (!parsedFrom || !parsedTo || parsedFrom.modelKey === parsedTo.modelKey || parsedFrom.provider !== parsedTo.provider) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'MODEL_RENAME_INVALID',
+        field: `modelRenames[${index}]`,
+      })
+    }
+
+    if (!normalized.some((item) => item.from === parsedFrom.modelKey && item.to === parsedTo.modelKey)) {
+      normalized.push({ from: parsedFrom.modelKey, to: parsedTo.modelKey })
+    }
+  }
+
+  return normalized
+}
+
 function normalizeWorkflowConcurrencyInput(rawWorkflowConcurrency: unknown): WorkflowConcurrencyPayload {
   if (rawWorkflowConcurrency === undefined) return {}
   if (!isRecord(rawWorkflowConcurrency)) {
@@ -1779,6 +1824,7 @@ export const PUT = apiHandler(async (request: NextRequest) => {
   const normalizedModelsInput = body.models === undefined ? undefined : normalizeModelList(body.models)
   const normalizedProviders = body.providers === undefined ? undefined : normalizeProvidersInput(body.providers)
   const normalizedDefaults = body.defaultModels === undefined ? undefined : normalizeDefaultModelsInput(body.defaultModels)
+  const modelRenames = normalizeModelRenamesInput(body.modelRenames)
   const normalizedCapabilityDefaults = body.capabilityDefaults === undefined
     ? undefined
     : normalizeCapabilitySelectionsInput(body.capabilityDefaults)
@@ -1793,10 +1839,39 @@ export const PUT = apiHandler(async (request: NextRequest) => {
     select: {
       customProviders: true,
       customModels: true,
+      analysisModel: true,
+      characterModel: true,
+      locationModel: true,
+      storyboardModel: true,
+      editModel: true,
+      videoModel: true,
+      audioModel: true,
+      lipSyncModel: true,
+      voiceDesignModel: true,
     },
   })
   const existingProviders = parseStoredProviders(existingPref?.customProviders)
   const existingModels = parseStoredModels(existingPref?.customModels)
+  const knownModelKeys = new Set([
+    ...existingModels.map((model) => model.modelKey),
+    existingPref?.analysisModel,
+    existingPref?.characterModel,
+    existingPref?.locationModel,
+    existingPref?.storyboardModel,
+    existingPref?.editModel,
+    existingPref?.videoModel,
+    existingPref?.audioModel,
+    existingPref?.lipSyncModel,
+    existingPref?.voiceDesignModel,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
+  for (const [index, rename] of modelRenames.entries()) {
+    if (!knownModelKeys.has(rename.from)) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'MODEL_RENAME_SOURCE_NOT_FOUND',
+        field: `modelRenames[${index}].from`,
+      })
+    }
+  }
   const normalizedModels = normalizedModelsInput === undefined
     ? undefined
     : resolveStoredMediaTemplates(resolveStoredLlmProtocols(normalizedModelsInput, existingModels), existingModels)
@@ -1876,6 +1951,28 @@ export const PUT = apiHandler(async (request: NextRequest) => {
     }
   }
 
+  // A model rename is explicit metadata from the model editor. Keep any
+  // untouched user defaults and project selections on the renamed key.
+  if (modelRenames.length > 0) {
+    const defaultFields = [
+      'analysisModel',
+      'characterModel',
+      'locationModel',
+      'storyboardModel',
+      'editModel',
+      'videoModel',
+      'audioModel',
+      'lipSyncModel',
+      'voiceDesignModel',
+    ] as const
+    for (const field of defaultFields) {
+      if (normalizedDefaults?.[field] !== undefined) continue
+      const current = existingPref?.[field]
+      const rename = modelRenames.find((item) => item.from === current)
+      if (rename) updateData[field] = rename.to
+    }
+  }
+
   if (normalizedWorkflowConcurrency !== undefined) {
     if (normalizedWorkflowConcurrency.analysis !== undefined) {
       updateData.analysisConcurrency = normalizedWorkflowConcurrency.analysis
@@ -1903,6 +2000,35 @@ export const PUT = apiHandler(async (request: NextRequest) => {
     update: updateData,
     create: { userId, ...updateData },
   })
+
+  if (modelRenames.length > 0) {
+    const projects = await prisma.project.findMany({
+      where: { userId },
+      select: { id: true },
+    })
+    const projectIds = projects.map((project) => project.id)
+    const projectModelFields = [
+      'analysisModel',
+      'characterModel',
+      'locationModel',
+      'storyboardModel',
+      'editModel',
+      'videoModel',
+      'audioModel',
+    ] as const
+
+    for (const rename of modelRenames) {
+      for (const field of projectModelFields) {
+        await prisma.novelPromotionProject.updateMany({
+          where: {
+            projectId: { in: projectIds },
+            [field]: rename.from,
+          },
+          data: { [field]: rename.to },
+        })
+      }
+    }
+  }
 
   return NextResponse.json({ success: true })
 })

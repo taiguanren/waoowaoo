@@ -37,6 +37,16 @@ const runOpenAICompatChatCompletionMock = vi.hoisted(() =>
     usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   })),
 )
+const runOpenAICompatChatCompletionStreamMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    id: 'chatcmpl_chat_stream_1',
+    object: 'chat.completion',
+    created: 1,
+    model: 'gpt-4.1-mini',
+    choices: [{ index: 0, message: { role: 'assistant', content: 'chat-stream' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  })),
+)
 
 const getProviderConfigMock = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -56,6 +66,7 @@ const recordCompletionUsageMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/model-gateway', () => ({
   resolveModelGatewayRoute: vi.fn(() => 'openai-compat'),
   runOpenAICompatChatCompletion: runOpenAICompatChatCompletionMock,
+  runOpenAICompatChatCompletionStream: runOpenAICompatChatCompletionStreamMock,
   runOpenAICompatResponsesCompletion: runOpenAICompatResponsesCompletionMock,
 }))
 
@@ -107,6 +118,7 @@ describe('llm chatCompletionStream openai-compatible protocol routing', () => {
 
     expect(runOpenAICompatResponsesCompletionMock).toHaveBeenCalledTimes(1)
     expect(runOpenAICompatChatCompletionMock).not.toHaveBeenCalled()
+    expect(runOpenAICompatChatCompletionStreamMock).not.toHaveBeenCalled()
     expect(completion.choices[0]?.message?.content).toBe('responses-stream')
     expect(onChunk).toHaveBeenCalled()
   })
@@ -127,7 +139,7 @@ describe('llm chatCompletionStream openai-compatible protocol routing', () => {
       undefined,
     )
 
-    expect(runOpenAICompatChatCompletionMock).toHaveBeenCalledTimes(1)
+    expect(runOpenAICompatChatCompletionStreamMock).toHaveBeenCalledTimes(1)
     expect(runOpenAICompatResponsesCompletionMock).not.toHaveBeenCalled()
     expect(completion.choices[0]?.message?.content).toBe('chat-stream')
   })
@@ -151,6 +163,25 @@ describe('llm chatCompletionStream openai-compatible protocol routing', () => {
     ).rejects.toThrow('MODEL_LLM_PROTOCOL_REQUIRED')
 
     expect(runOpenAICompatChatCompletionMock).not.toHaveBeenCalled()
+    expect(runOpenAICompatChatCompletionStreamMock).not.toHaveBeenCalled()
     expect(runOpenAICompatResponsesCompletionMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to chat-completions when Responses returns a gateway timeout', async () => {
+    runOpenAICompatResponsesCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error('OPENAI_COMPAT_RESPONSES_FAILED: 524'), { status: 524 }),
+    )
+
+    const completion = await chatCompletionStream(
+      'user-1',
+      'openai-compatible:node-1::gpt-4.1-mini',
+      [{ role: 'user', content: 'hello' }],
+      { temperature: 0.2 },
+      undefined,
+    )
+
+    expect(runOpenAICompatResponsesCompletionMock).toHaveBeenCalledTimes(1)
+    expect(runOpenAICompatChatCompletionStreamMock).toHaveBeenCalledTimes(1)
+    expect(completion.choices[0]?.message?.content).toBe('chat-stream')
   })
 })

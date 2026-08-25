@@ -159,6 +159,125 @@ const CLIP_BOUNDARY_SUFFIX = `
 2. Allow punctuation/whitespace differences, but do not rewrite key entities or events.
 3. If anchors cannot be located reliably, return [] directly.`
 
+type LocalClipSegment = {
+  start: string
+  end: string
+  summary: string
+  location: string | null
+  characters: string[]
+  props: string[]
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function collectAssetNames(
+  analyzed: Record<string, unknown>[],
+  baseNames: string[],
+): string[] {
+  return uniqueStrings([
+    ...analyzed.map((item) => asString(item.name)),
+    ...baseNames,
+  ])
+}
+
+function findLocalAssetNames(text: string, names: string[]): string[] {
+  return names.filter((name) => {
+    if (text.includes(name)) return true
+    const stem = name.split('_')[0]?.trim()
+    return !!stem && stem !== name && text.includes(stem)
+  })
+}
+
+function findLocalSceneStarts(content: string): number[] {
+  const starts: number[] = []
+  let offset = 0
+  for (const line of content.split(/\r?\n/u)) {
+    if (/^[ \t]*\d{1,3}[-\uFF0D]\d{1,3}/u.test(line)) {
+      starts.push(offset)
+    }
+    offset += line.length + 1
+  }
+  return starts
+}
+
+function buildLocalClipSegments(
+  content: string,
+  analyzedCharacters: Record<string, unknown>[],
+  analyzedLocations: Record<string, unknown>[],
+  analyzedProps: Record<string, unknown>[],
+  baseCharacters: string[],
+  baseLocations: string[],
+  baseProps: string[],
+): LocalClipSegment[] | null {
+  const sceneStarts = findLocalSceneStarts(content)
+  if (sceneStarts.length < 2) return null
+
+  // Keep any title/preamble attached to the first scene so the original text
+  // remains fully covered while the generated clips follow screenplay scenes.
+  const boundaries = [0, ...sceneStarts.slice(1), content.length]
+  const characterNames = collectAssetNames(analyzedCharacters, baseCharacters)
+  const locationNames = collectAssetNames(analyzedLocations, baseLocations)
+  const propNames = collectAssetNames(analyzedProps, baseProps)
+  const segments: LocalClipSegment[] = []
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startIndex = boundaries[index]
+    const endIndex = boundaries[index + 1]
+    const segment = content.slice(startIndex, endIndex)
+    const trimmed = segment.trim()
+    if (!trimmed) continue
+
+    const midpoint = Math.max(1, Math.floor(trimmed.length / 2))
+    const start = trimmed.slice(0, Math.min(160, midpoint))
+    const end = trimmed.slice(Math.max(midpoint, trimmed.length - 160))
+    const firstLine = trimmed.split(/\r?\n/u).map((line) => line.trim()).find(Boolean) || `Scene ${index + 1}`
+    const locations = findLocalAssetNames(segment, locationNames)
+
+    segments.push({
+      start,
+      end,
+      summary: firstLine,
+      location: locations.length > 0 ? locations.join(',') : null,
+      characters: findLocalAssetNames(segment, characterNames),
+      props: findLocalAssetNames(segment, propNames),
+    })
+  }
+
+  return segments.length >= 2 ? segments : null
+}
+
+function localSegmentsToCandidates(
+  content: string,
+  segments: LocalClipSegment[],
+): StoryToScriptClipCandidate[] | null {
+  const matcher = createClipContentMatcher(content)
+  const candidates: StoryToScriptClipCandidate[] = []
+  let searchFrom = 0
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]
+    const match = matcher.matchBoundary(segment.start, segment.end, searchFrom)
+    if (!match) return null
+    candidates.push({
+      id: `clip_${index + 1}`,
+      startText: segment.start,
+      endText: segment.end,
+      summary: segment.summary,
+      location: segment.location,
+      characters: segment.characters,
+      props: segment.props,
+      content: content.slice(match.startIndex, match.endIndex),
+      matchLevel: match.level,
+      matchConfidence: match.confidence,
+    })
+    searchFrom = match.endIndex
+  }
+
+  return candidates
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -180,6 +299,10 @@ function isRecoverableJsonParseError(error: unknown, normalizedMessage: string):
     || normalizedMessage.includes('unexpected end of json input')
     || normalizedMessage.includes('json format invalid')
     || normalizedMessage.includes('invalid clip json format')
+    || normalizedMessage.includes('colon expected')
+    || normalizedMessage.includes('comma expected')
+    || normalizedMessage.includes('object key expected')
+    || normalizedMessage.includes('unterminated string')
 }
 
 async function runStepWithRetry<T>(
@@ -282,11 +405,36 @@ export async function runStoryToScriptOrchestrator(
     props_lib_name: basePropsText,
   })
 
+  const allowLocalSceneFallback = findLocalSceneStarts(content).length >= 2
+  const runAnalysisStep = async <T>(
+    meta: StoryToScriptStepMeta,
+    prompt: string,
+    action: string,
+    maxOutputTokens: number,
+    parse: (text: string) => T,
+  ): Promise<{ output: StoryToScriptStepOutput; parsed: T }> => {
+    try {
+      return await runStepWithRetry(runStep, meta, prompt, action, maxOutputTokens, parse)
+    } catch (error) {
+      const normalizedError = normalizeAnyError(error, { context: 'worker' })
+      if (!allowLocalSceneFallback || (!normalizedError.retryable && !isRecoverableJsonParseError(error, normalizedError.message.toLowerCase()))) {
+        throw error
+      }
+      onLog?.('资产分析暂不可用，继续使用原文分场', {
+        action,
+        errorCode: normalizedError.code,
+      })
+      return {
+        output: { text: '{}', reasoning: '' },
+        parsed: {} as T,
+      }
+    }
+  }
+
   onLog?.('开始步骤1：角色/场景/道具分析（并行）')
   const analysisResults = await mapWithConcurrency(
     [
-      () => runStepWithRetry(
-        runStep,
+      () => runAnalysisStep(
         {
           stepId: 'analyze_characters',
           stepTitle: 'progress.streamStep.analyzeCharacters',
@@ -301,8 +449,7 @@ export async function runStoryToScriptOrchestrator(
         2200,
         safeParseJsonObject,
       ),
-      () => runStepWithRetry(
-        runStep,
+      () => runAnalysisStep(
         {
           stepId: 'analyze_locations',
           stepTitle: 'progress.streamStep.analyzeLocations',
@@ -317,8 +464,7 @@ export async function runStoryToScriptOrchestrator(
         2200,
         safeParseJsonObject,
       ),
-      () => runStepWithRetry(
-        runStep,
+      () => runAnalysisStep(
         {
           stepId: 'analyze_props',
           stepTitle: 'progress.streamStep.analyzeProps',
@@ -417,7 +563,31 @@ export async function runStoryToScriptOrchestrator(
   let clipList: StoryToScriptClipCandidate[] = []
   let lastBoundaryError: Error | null = null
 
-  for (let attempt = 1; attempt <= MAX_SPLIT_BOUNDARY_ATTEMPTS; attempt += 1) {
+  const localSegments = buildLocalClipSegments(
+    content,
+    analyzedCharacters,
+    analyzedLocations,
+    analyzedProps,
+    baseCharacters,
+    baseLocations,
+    baseProps,
+  )
+  if (localSegments) {
+    const localCandidates = localSegmentsToCandidates(content, localSegments)
+    if (localCandidates) {
+      clipList = localCandidates
+      splitStep = {
+        text: JSON.stringify(localSegments),
+        reasoning: '',
+      }
+      onLog?.('检测到明确分场标题，使用本地边界切分', {
+        clipCount: clipList.length,
+        source: 'local_scene_boundaries',
+      })
+    }
+  }
+
+  if (!splitStep) for (let attempt = 1; attempt <= MAX_SPLIT_BOUNDARY_ATTEMPTS; attempt += 1) {
     const splitMeta: StoryToScriptStepMeta = {
       stepId: 'split_clips',
       stepAttempt: attempt,

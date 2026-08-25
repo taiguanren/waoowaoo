@@ -4,9 +4,10 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { GoogleGenAI } from '@google/genai'
 import {
   resolveModelGatewayRoute,
-  runOpenAICompatChatCompletion,
+  runOpenAICompatChatCompletionStream,
   runOpenAICompatResponsesCompletion,
 } from '@/lib/model-gateway'
+import { shouldFallbackFromOpenAICompatResponses } from '@/lib/model-gateway/openai-compat/common'
 import {
   getProviderConfig,
   getProviderKey,
@@ -115,25 +116,40 @@ export async function chatCompletionStream(
       if (!selection.llmProtocol) {
         throw new Error(`MODEL_LLM_PROTOCOL_REQUIRED: ${selection.modelKey}`)
       }
-      const compatEngine = selection.llmProtocol === 'responses'
+      let compatEngine = selection.llmProtocol === 'responses'
         ? 'openai_compat_responses'
         : 'openai_compat_chat_completions'
       emitStreamStage(callbacks, streamStep, 'streaming', 'openai-compat')
-      const completion = selection.llmProtocol === 'responses'
-        ? await runOpenAICompatResponsesCompletion({
+      let completion: OpenAI.Chat.Completions.ChatCompletion
+      if (selection.llmProtocol === 'responses') {
+        try {
+          completion = await runOpenAICompatResponsesCompletion({
+            userId,
+            providerId: provider,
+            modelId: resolvedModelId,
+            messages,
+            temperature,
+          })
+        } catch (error) {
+          if (!shouldFallbackFromOpenAICompatResponses(error)) throw error
+          compatEngine = 'openai_compat_chat_completions_fallback'
+          completion = await runOpenAICompatChatCompletionStream({
+            userId,
+            providerId: provider,
+            modelId: resolvedModelId,
+            messages,
+            temperature,
+          })
+        }
+      } else {
+        completion = await runOpenAICompatChatCompletionStream({
           userId,
           providerId: provider,
           modelId: resolvedModelId,
           messages,
           temperature,
         })
-        : await runOpenAICompatChatCompletion({
-          userId,
-          providerId: provider,
-          modelId: resolvedModelId,
-          messages,
-          temperature,
-        })
+      }
       const completionParts = getCompletionParts(completion)
       let seq = 1
       if (completionParts.reasoning) {

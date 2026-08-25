@@ -462,6 +462,9 @@ export async function resolveVideoSourceFromGeneration(
   if (typeof params.options?.duration === 'number') {
     runtimeSelections.duration = params.options.duration
   }
+  if (typeof params.options?.fps === 'number') {
+    runtimeSelections.fps = params.options.fps
+  }
   if (typeof params.options?.resolution === 'string') {
     runtimeSelections.resolution = params.options.resolution
   }

@@ -27,12 +27,87 @@ type SplitResponse = {
 }
 
 const MAX_EPISODE_SPLIT_ATTEMPTS = 2
+const CHINESE_DIGITS: Record<string, number> = {
+  '零': 0,
+  '〇': 0,
+  '一': 1,
+  '二': 2,
+  '两': 2,
+  '三': 3,
+  '四': 4,
+  '五': 5,
+  '六': 6,
+  '七': 7,
+  '八': 8,
+  '九': 9,
+  '十': 10,
+  '百': 100,
+  '千': 1000,
+}
 const EPISODE_SPLIT_BOUNDARY_SUFFIX = `
 
 [Boundary Constraints]
 1. Each episode MUST include both startMarker and endMarker from the original text.
 2. Markers must be locatable in the original text; allow punctuation/whitespace differences only.
 3. If boundaries cannot be located reliably, return an empty episodes array.`
+
+function parseEpisodeNumber(raw: string): number {
+  if (/^\d+$/.test(raw)) return Number.parseInt(raw, 10)
+  let result = 0
+  let current = 0
+  let lastUnit = 1
+  for (const char of raw) {
+    const value = CHINESE_DIGITS[char]
+    if (value === undefined) continue
+    if (value >= 10) {
+      if (current === 0) current = 1
+      current *= value
+      if (value >= lastUnit) {
+        result += current
+        current = 0
+      }
+      lastUnit = value
+    } else {
+      current = value
+    }
+  }
+  return result + current
+}
+
+export function splitByExplicitEpisodeHeaders(content: string): Array<{
+  number: number
+  title: string
+  summary: string
+  content: string
+  wordCount: number
+}> {
+  const pattern = /^第([零〇一二两三四五六七八九十百千\d]+)集[：:\t ]*([^\r\n]*)$/gm
+  const matches: Array<{ index: number; number: number; title: string }> = []
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(content)) !== null) {
+    const number = parseEpisodeNumber(match[1])
+    if (number <= 0 || matches.some((item) => item.number === number)) continue
+    matches.push({
+      index: match.index,
+      number,
+      title: match[2]?.trim() || `第 ${number} 集`,
+    })
+  }
+  if (matches.length === 0) return []
+
+  return matches.map((item, index) => {
+    const startIndex = index === 0 ? 0 : item.index
+    const endIndex = matches[index + 1]?.index ?? content.length
+    const episodeContent = content.slice(startIndex, endIndex).trim()
+    return {
+      number: item.number,
+      title: item.title,
+      summary: '',
+      content: episodeContent,
+      wordCount: countWords(episodeContent),
+    }
+  }).filter((item) => item.content.length > 0)
+}
 
 function parseSplitResponse(aiResponse: string): SplitResponse {
   const parsed = safeParseJsonObject(aiResponse) as SplitResponse
@@ -79,6 +154,19 @@ export async function handleEpisodeSplitTask(job: Job<TaskJobData>) {
   })
   if (!novelProject) {
     throw new Error('Novel promotion data not found')
+  }
+
+  const explicitEpisodes = splitByExplicitEpisodeHeaders(content)
+  if (explicitEpisodes.length > 0) {
+    await reportTaskProgress(job, 96, {
+      stage: 'episode_split_done',
+      stageLabel: '已按明确集标题完成分集',
+      displayMode: 'detail',
+    })
+    return {
+      success: true,
+      episodes: explicitEpisodes,
+    }
   }
 
   const userConfig = await getUserModelConfig(job.data.userId)

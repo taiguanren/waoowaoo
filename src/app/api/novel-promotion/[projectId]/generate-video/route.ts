@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError, getRequestId } from '@/lib/api-errors'
 import { submitTask } from '@/lib/task/submitter'
-import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
+import { resolveTaskLocale } from '@/lib/task/resolve-locale'
 import { TASK_TYPE } from '@/lib/task/types'
 import { buildDefaultTaskBillingInfo } from '@/lib/billing'
 import { BillingOperationError } from '@/lib/billing/errors'
@@ -193,7 +193,9 @@ export const POST = apiHandler(async (
 
   const body = await request.json()
   requireVideoModelKeyFromPayload(body)
-  const locale = resolveRequiredTaskLocale(request, body)
+  // Video buttons can be triggered from the canvas shell without the locale
+  // metadata/header. Keep the task recoverable using the app default locale.
+  const locale = resolveTaskLocale(request, body) || 'zh'
   const isBatch = body?.all === true
 
   validateFirstLastFrameModel(body?.firstLastFrame)

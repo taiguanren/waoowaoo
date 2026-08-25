@@ -9,6 +9,7 @@ import {
 import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 
 vi.mock('@/lib/storage', () => ({
+  getObjectBuffer: vi.fn(async () => Buffer.from([1, 2, 3])),
   getSignedUrl: vi.fn((key: string) => `/signed/${key}`),
   toFetchableUrl: vi.fn((value: string) => (
     value.startsWith('/') ? `http://localhost:3000${value}` : value
@@ -91,6 +92,13 @@ describe('outbound-image normalization', () => {
   it('converts normalized source to data url base64 payload', async () => {
     const dataUrl = await normalizeToBase64ForGeneration('images/direct.png')
     expect(dataUrl).toBe('data:image/png;base64,AQID')
+  })
+
+  it('reads storage keys directly without depending on the internal app port', async () => {
+    resolveStorageKeyMock.mockResolvedValueOnce('images/direct.png')
+    const dataUrl = await normalizeToBase64ForGeneration('images/direct.png')
+    expect(dataUrl).toBe('data:image/png;base64,AQID')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sniffs png mime when upstream returns application/octet-stream', async () => {

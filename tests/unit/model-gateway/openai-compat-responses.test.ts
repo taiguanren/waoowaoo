@@ -10,9 +10,17 @@ const resolveOpenAICompatClientConfigMock = vi.hoisted(() =>
 
 vi.mock('@/lib/model-gateway/openai-compat/common', () => ({
   resolveOpenAICompatClientConfig: resolveOpenAICompatClientConfigMock,
+  getOpenAICompatResponsesTimeoutMs: () => 90_000,
+  shouldFallbackFromOpenAICompatResponses: (error: unknown) => {
+    const status = error && typeof error === 'object' && typeof (error as { status?: unknown }).status === 'number'
+      ? (error as { status: number }).status
+      : undefined
+    return typeof status === 'number' && status >= 500
+  },
 }))
 
 import { runOpenAICompatResponsesCompletion } from '@/lib/model-gateway/openai-compat/responses'
+import { getOpenAICompatResponsesTimeoutMs, shouldFallbackFromOpenAICompatResponses } from '@/lib/model-gateway/openai-compat/common'
 
 describe('model-gateway openai-compat responses executor', () => {
   beforeEach(() => {
@@ -63,5 +71,13 @@ describe('model-gateway openai-compat responses executor', () => {
         temperature: 0.2,
       }),
     ).rejects.toThrow('OPENAI_COMPAT_RESPONSES_FAILED: 404')
+  })
+
+  it('uses a bounded timeout and recognizes gateway failures for fallback', () => {
+    expect(getOpenAICompatResponsesTimeoutMs()).toBeGreaterThanOrEqual(10_000)
+    expect(shouldFallbackFromOpenAICompatResponses(
+      Object.assign(new Error('OPENAI_COMPAT_RESPONSES_FAILED: 524'), { status: 524 }),
+    )).toBe(true)
+    expect(shouldFallbackFromOpenAICompatResponses(new Error('invalid request'))).toBe(false)
   })
 })

@@ -1,0 +1,80 @@
+[
+  {
+    "modelType": "image",
+    "provider": "comfyui",
+    "modelId": "z-image-turbo",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "1K"
+        ]
+      }
+    }
+  },
+  {
+    "modelType": "video",
+    "provider": "comfyui",
+    "modelId": "minimax-h3-i2v",
+    "capabilities": {
+      "video": {
+        "generationModeOptions": [
+          "normal"
+        ],
+        "durationOptions": [
+          5,
+          10,
+          15
+        ],
+        "fpsOptions": [
+          24
+        ],
+        "firstlastframe": false,
+        "supportGenerateAudio": true
+      }
+    }
+  },
+  {
+    "modelType": "video",
+    "provider": "comfyui",
+    "modelId": "minimax-h3-r2v",
+    "capabilities": {
+      "video": {
+        "generationModeOptions": [
+          "normal"
+        ],
+        "durationOptions": [
+          5,
+          10,
+          15
+        ],
+        "fpsOptions": [
+          24
+        ],
+        "firstlastframe": false,
+        "supportGenerateAudio": true
+      }
+    }
+  },
+  {
+    "modelType": "video",
+    "provider": "comfyui",
+    "modelId": "minimax-h3-t2v",
+    "capabilities": {
+      "video": {
+        "generationModeOptions": [
+          "normal"
+        ],
+        "durationOptions": [
+          5,
+          10,
+          15
+        ],
+        "fpsOptions": [
+          24
+        ],
+        "firstlastframe": false,
+        "supportGenerateAudio": true
+      }
+    }
+  }
+]

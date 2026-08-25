@@ -491,17 +491,6 @@ export async function handleStoryToScriptTask(job: Job<TaskJobData>) {
         })
       }
 
-      if (result.summary.screenplayFailedCount > 0) {
-        const failed = result.screenplayResults.filter((item) => !item.success)
-        const preview = failed
-          .slice(0, 3)
-          .map((item) => `${item.clipId}:${item.error || 'unknown error'}`)
-          .join(' | ')
-        throw new Error(
-          `STORY_TO_SCRIPT_PARTIAL_FAILED: ${result.summary.screenplayFailedCount}/${result.summary.clipCount} screenplay steps failed. ${preview}`,
-        )
-      }
-
       await reportTaskProgress(job, 80, {
         stage: 'story_to_script_persist',
         stageLabel: 'progress.stage.storyToScriptPersist',
@@ -584,6 +573,17 @@ export async function handleStoryToScriptTask(job: Job<TaskJobData>) {
         stageLabel: 'progress.stage.storyToScriptPersistDone',
         displayMode: 'detail',
       })
+
+      if (result.summary.screenplayFailedCount > 0) {
+        const failed = result.screenplayResults.filter((item) => !item.success)
+        const preview = failed
+          .slice(0, 3)
+          .map((item) => `${item.clipId}:${item.error || 'unknown error'}`)
+          .join(' | ')
+        throw new Error(
+          `STORY_TO_SCRIPT_PARTIAL_FAILED: ${result.summary.screenplayFailedCount}/${result.summary.clipCount} screenplay steps failed. ${preview}`,
+        )
+      }
 
       return {
         episodeId,

@@ -155,4 +155,21 @@ describe('llm chatCompletion openai-compatible protocol routing', () => {
     expect(runOpenAICompatChatCompletionMock).not.toHaveBeenCalled()
     expect(runOpenAICompatResponsesCompletionMock).not.toHaveBeenCalled()
   })
+
+  it('falls back to chat-completions when Responses returns a gateway timeout', async () => {
+    runOpenAICompatResponsesCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error('OPENAI_COMPAT_RESPONSES_FAILED: 524'), { status: 524 }),
+    )
+
+    const completion = await chatCompletion(
+      'user-1',
+      'openai-compatible:node-1::gpt-4.1-mini',
+      [{ role: 'user', content: 'hello' }],
+      { temperature: 0.2 },
+    )
+
+    expect(runOpenAICompatResponsesCompletionMock).toHaveBeenCalledTimes(1)
+    expect(runOpenAICompatChatCompletionMock).toHaveBeenCalledTimes(1)
+    expect(completion.choices[0]?.message?.content).toBe('chat-ok')
+  })
 })

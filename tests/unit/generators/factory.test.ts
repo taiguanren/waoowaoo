@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createAudioGenerator, createImageGenerator, createVideoGenerator } from '@/lib/generators/factory'
 import { GoogleVeoVideoGenerator } from '@/lib/generators/video/google'
-import { OpenAICompatibleVideoGenerator } from '@/lib/generators/video/openai-compatible'
 import { BailianAudioGenerator, BailianImageGenerator, BailianVideoGenerator, SiliconFlowAudioGenerator } from '@/lib/generators/official'
+import { ComfyUiImageGenerator, ComfyUiVideoGenerator } from '@/lib/providers/comfyui'
 
 describe('generator factory', () => {
   it('routes gemini-compatible video provider to Google video generator', () => {
@@ -18,5 +18,10 @@ describe('generator factory', () => {
 
   it('routes siliconflow audio provider to official generator', () => {
     expect(createAudioGenerator('siliconflow')).toBeInstanceOf(SiliconFlowAudioGenerator)
+  })
+
+  it('routes ComfyUI image and video models to the workflow generators', () => {
+    expect(createImageGenerator('comfyui', 'z-image-turbo')).toBeInstanceOf(ComfyUiImageGenerator)
+    expect(createVideoGenerator('comfyui')).toBeInstanceOf(ComfyUiVideoGenerator)
   })
 })

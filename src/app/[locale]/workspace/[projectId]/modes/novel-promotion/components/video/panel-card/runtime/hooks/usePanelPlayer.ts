@@ -1,5 +1,5 @@
 import { logError as _ulogError } from '@/lib/logging/core'
-import { useCallback, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useRef, useState, type MouseEvent, type SyntheticEvent } from 'react'
 
 interface UsePanelPlayerParams {
   videoRatio: string
@@ -8,6 +8,12 @@ interface UsePanelPlayerParams {
   lipSyncVideoUrl?: string
   showLipSyncVideo: boolean
   onPreviewImage?: (imageUrl: string) => void
+}
+
+export function prepareVideoForAudiblePlayback(video: HTMLVideoElement) {
+  video.defaultMuted = false
+  video.muted = false
+  video.volume = 1
 }
 
 export function usePanelPlayer({
@@ -33,16 +39,21 @@ export function usePanelPlayer({
 
   const handlePlayClick = useCallback(async () => {
     setIsPlaying(true)
-    setTimeout(async () => {
-      if (!videoRef.current) return
-      try {
-        await videoRef.current.play()
-      } catch (error: unknown) {
-        if ((error as { name?: string }).name !== 'AbortError') {
-          _ulogError('Video play error:', error)
-        }
+    const video = videoRef.current
+    if (!video) return
+
+    prepareVideoForAudiblePlayback(video)
+    try {
+      await video.play()
+    } catch (error: unknown) {
+      if ((error as { name?: string }).name !== 'AbortError') {
+        _ulogError('Video play error:', error)
       }
-    }, 100)
+    }
+  }, [])
+
+  const handleVideoLoadedMetadata = useCallback((event: SyntheticEvent<HTMLVideoElement>) => {
+    prepareVideoForAudiblePlayback(event.currentTarget)
   }, [])
 
   return {
@@ -53,5 +64,6 @@ export function usePanelPlayer({
     videoRef,
     handlePreviewImage,
     handlePlayClick,
+    handleVideoLoadedMetadata,
   }
 }

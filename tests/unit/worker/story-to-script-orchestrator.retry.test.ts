@@ -125,6 +125,89 @@ describe('story-to-script orchestrator retry', () => {
     expect(actionCalls.get('analyze_characters')).toBe(1)
   })
 
+  it('treats a gateway 524 as retryable', async () => {
+    const actionCalls = new Map<string, number>()
+    const runStep = vi.fn(async (_meta, _prompt, action: string) => {
+      actionCalls.set(action, (actionCalls.get(action) || 0) + 1)
+      if (action === 'analyze_characters') {
+        throw new Error('524 status code (no body)')
+      }
+      return { text: JSON.stringify({ locations: [] }), reasoning: '' }
+    })
+
+    await expect(
+      runStoryToScriptOrchestrator({
+        content: '甲在门口。乙回答。',
+        baseCharacters: [],
+        baseLocations: [],
+        baseCharacterIntroductions: [],
+        promptTemplates: {
+          characterPromptTemplate: '{input}',
+          locationPromptTemplate: '{input}',
+          propPromptTemplate: '{input}',
+          clipPromptTemplate: '{input}',
+          screenplayPromptTemplate: '{clip_content}',
+        },
+        runStep,
+      }),
+    ).rejects.toThrow('524 status code')
+
+    expect(actionCalls.get('analyze_characters')).toBe(3)
+  })
+
+  it('uses explicit screenplay scene headings without a long split request', async () => {
+    const content = [
+      '《样片》',
+      '第一集',
+      '1-1、夜、内、车厢',
+      '△周建军坐在座位上。',
+      '1-2、夜、内、车门',
+      '△男孩走向车门。',
+      '1-3、夜、内、车厢',
+      '△周建军拉住男孩。',
+    ].join('\n')
+    const actionCalls = new Map<string, number>()
+    const runStep = vi.fn(async (_meta, _prompt, action: string) => {
+      actionCalls.set(action, (actionCalls.get(action) || 0) + 1)
+      if (action === 'analyze_characters') {
+        return { text: JSON.stringify({ characters: [{ name: '周建军' }] }), reasoning: '' }
+      }
+      if (action === 'analyze_locations') {
+        return { text: JSON.stringify({ locations: [{ name: '车厢_夜间' }] }), reasoning: '' }
+      }
+      if (action === 'analyze_props') {
+        return { text: JSON.stringify({ props: [] }), reasoning: '' }
+      }
+      if (action === 'screenplay_conversion') {
+        return { text: JSON.stringify({ scenes: [{ scene_number: 1 }] }), reasoning: '' }
+      }
+      throw new Error(`unexpected action: ${action}`)
+    })
+
+    const result = await runStoryToScriptOrchestrator({
+      content,
+      baseCharacters: [],
+      baseLocations: [],
+      baseCharacterIntroductions: [],
+      promptTemplates: {
+        characterPromptTemplate: '{input}',
+        locationPromptTemplate: '{input}',
+        propPromptTemplate: '{input}',
+        clipPromptTemplate: '{input}',
+        screenplayPromptTemplate: '{clip_content}',
+      },
+      runStep,
+    })
+
+    expect(result.summary.clipCount).toBe(3)
+    expect(actionCalls.get('split_clips') || 0).toBe(0)
+    expect(result.clipList.map((clip) => clip.content.trim())).toEqual([
+      content.slice(0, content.indexOf('1-2、')).trim(),
+      content.slice(content.indexOf('1-2、'), content.indexOf('1-3、')).trim(),
+      content.slice(content.indexOf('1-3、')).trim(),
+    ])
+  })
+
   it('parses first balanced JSON block when model appends extra JSON text', async () => {
     const runStep = vi.fn(async (_meta, _prompt, action: string) => {
       if (action === 'analyze_characters') {

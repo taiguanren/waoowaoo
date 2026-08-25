@@ -31,6 +31,7 @@ export interface TextPanel {
 
 export interface Panel {
   id?: string
+  updatedAt?: string | Date | null
   panelIndex: number
   panelNumber?: number | null
   shotType?: string | null

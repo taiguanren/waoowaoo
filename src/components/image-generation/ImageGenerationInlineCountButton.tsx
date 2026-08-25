@@ -1,6 +1,6 @@
 'use client'
 
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 
 interface ImageGenerationInlineCountButtonProps {
@@ -44,25 +44,26 @@ export default function ImageGenerationInlineCountButton({
 }: ImageGenerationInlineCountButtonProps) {
   const isActionDisabled = disabled || actionDisabled === true
   const isSelectDisabled = disabled || selectDisabled === true
-  const rootStateClassName = isActionDisabled
-    ? 'opacity-60 cursor-not-allowed'
+  const actionStateClassName = isActionDisabled
+    ? 'cursor-not-allowed opacity-60'
     : 'cursor-pointer'
   const selectStateClassName = isSelectDisabled
     ? 'pointer-events-none opacity-70'
     : 'cursor-pointer'
   const resolvedActionClassName = (actionClassName || className).trim()
+  const runAction = () => {
+    if (isActionDisabled) return
+    onClick()
+  }
 
   if (!showCountControl) {
     return (
       <button
         type="button"
-        onClick={() => {
-          if (isActionDisabled) return
-          onClick()
-        }}
+        onClick={runAction}
         disabled={isActionDisabled}
         aria-label={ariaLabel}
-        className={`${resolvedActionClassName} ${rootStateClassName}`.trim()}
+        className={`${resolvedActionClassName} ${actionStateClassName}`.trim()}
       >
         <span className={`${labelClassName} inline-flex items-center gap-1 whitespace-nowrap`.trim()}>{prefix}</span>
       </button>
@@ -74,13 +75,10 @@ export default function ImageGenerationInlineCountButton({
       <div className="inline-flex items-center gap-1">
         <button
           type="button"
-          onClick={() => {
-            if (isActionDisabled) return
-            onClick()
-          }}
+          onClick={runAction}
           disabled={isActionDisabled}
           aria-label={ariaLabel}
-          className={`${resolvedActionClassName} ${rootStateClassName}`.trim()}
+          className={`${resolvedActionClassName} ${actionStateClassName}`.trim()}
         >
           <span className={`${labelClassName} inline-flex items-center gap-1 whitespace-nowrap`.trim()}>{prefix}</span>
         </button>
@@ -115,28 +113,21 @@ export default function ImageGenerationInlineCountButton({
 
   return (
     <div
-      role="button"
-      tabIndex={isActionDisabled ? -1 : 0}
-      onClick={() => {
-        if (isActionDisabled) return
-        onClick()
-      }}
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-        if (isActionDisabled) return
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onClick()
-        }
-      }}
-      aria-disabled={isActionDisabled}
-      className={`${className} ${rootStateClassName}`.trim()}
+      className={`${className} ${disabled ? 'opacity-60' : ''}`.trim()}
     >
-      <span className={`${labelClassName} inline-flex shrink-0 items-center whitespace-nowrap leading-none`.trim()}>{prefix}</span>
+      <button
+        type="button"
+        onClick={runAction}
+        disabled={isActionDisabled}
+        aria-label={ariaLabel}
+        className={`${labelClassName} ${actionStateClassName} inline-flex shrink-0 items-center whitespace-nowrap bg-transparent leading-none outline-none`.trim()}
+      >
+        {prefix}
+      </button>
       <span
         className={`group relative inline-flex h-8 shrink-0 items-center rounded-full bg-white/12 px-2 transition-colors ${
           isSelectDisabled ? '' : 'hover:bg-white/16 focus-within:bg-white/18'
         }`}
-        onClick={(event: MouseEvent<HTMLSpanElement>) => event.stopPropagation()}
       >
         <select
           value={String(value)}
@@ -155,7 +146,17 @@ export default function ImageGenerationInlineCountButton({
           <AppIcon name="chevronDown" className="h-3 w-3" />
         </span>
       </span>
-      <span className={`${labelClassName} inline-flex shrink-0 items-center whitespace-nowrap leading-none`.trim()}>{suffix}</span>
+      {suffix ? (
+        <button
+          type="button"
+          onClick={runAction}
+          disabled={isActionDisabled}
+          aria-label={ariaLabel}
+          className={`${labelClassName} ${actionStateClassName} inline-flex shrink-0 items-center whitespace-nowrap bg-transparent leading-none outline-none`.trim()}
+        >
+          {suffix}
+        </button>
+      ) : null}
     </div>
   )
 }

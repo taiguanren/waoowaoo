@@ -278,6 +278,22 @@ export function resolveGenerationOptionsForModel(input: {
   let normalizedSelection = { ...selection }
   const autofillIssues: CapabilitySelectionValidationIssue[] = []
 
+  // A capability with exactly one allowed value has no meaningful user choice.
+  // Fill it at the boundary so older clients and batch callers cannot fail on
+  // a missing singleton field (for example ComfyUI H3 fps=24).
+  if (input.requireAllFields ?? true) {
+    const optionFields = getCapabilityOptionFields(input.modelType, input.capabilities)
+    for (const [field, allowedValues] of Object.entries(optionFields)) {
+      if (allowedValues.length !== 1 || normalizedSelection[field] !== undefined) continue
+      const missingIssue = precheckIssues.find(
+        (issue) => issue.code === 'CAPABILITY_REQUIRED'
+          && issue.field === `capabilities.${input.modelKey}.${field}`,
+      )
+      if (!missingIssue) continue
+      normalizedSelection[field] = allowedValues[0]
+    }
+  }
+
   // V7: 针对 image 模型缺少 resolution 的情况，如果 catalog 中声明了 resolutionOptions，
   // 且用户在配置中完全未设置该字段，则自动使用第一个可选值作为默认值，提升 UI/UX。
   if (input.modelType === 'image') {

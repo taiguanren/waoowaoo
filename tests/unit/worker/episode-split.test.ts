@@ -77,7 +77,7 @@ vi.mock('@/lib/novel-promotion/story-to-script/clip-matching', () => ({
   }),
 }))
 
-import { handleEpisodeSplitTask } from '@/lib/workers/handlers/episode-split'
+import { handleEpisodeSplitTask, splitByExplicitEpisodeHeaders } from '@/lib/workers/handlers/episode-split'
 
 function buildJob(content: string): Job<TaskJobData> {
   return {
@@ -123,5 +123,27 @@ describe('worker episode-split', () => {
     expect(result.episodes[0]?.title).toBe('第一集')
     expect(result.episodes[0]?.content).toContain('START_MARKER')
     expect(result.episodes[0]?.content).toContain('END_MARKER')
+  })
+
+  it('splits an explicitly labeled single episode without calling the model', async () => {
+    const content = [
+      '项目名称：耳机。这里是项目说明与人物介绍，用于保留第一集标题前的上下文。',
+      '这部分继续补足长度，确保完整内容超过任务最小字数限制，并应归入第一集。',
+      '第一集',
+      '1-1、夜、内、地铁车厢。周建军坐在座位上，列车缓慢前行。',
+      '1-2、夜、内、车门区域。男孩靠近车门，危险逐渐逼近。',
+    ].join('\n\n')
+
+    const direct = splitByExplicitEpisodeHeaders(content)
+    expect(direct).toHaveLength(1)
+    expect(direct[0]?.number).toBe(1)
+    expect(direct[0]?.title).toBe('第 1 集')
+    expect(direct[0]?.content).toContain('项目名称：耳机')
+    expect(direct[0]?.content).toContain('1-2、夜、内、车门区域')
+
+    const result = await handleEpisodeSplitTask(buildJob(content))
+    expect(result.success).toBe(true)
+    expect(result.episodes).toHaveLength(1)
+    expect(llmClientMock.chatCompletion).not.toHaveBeenCalled()
   })
 })

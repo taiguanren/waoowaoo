@@ -55,3 +55,26 @@ describe('model-capabilities/lookup - image resolution defaulting', () => {
   })
 })
 
+describe('model-capabilities/lookup - singleton video defaults', () => {
+  it('fills a singleton fps option when an older request omits it', () => {
+    const result = resolveGenerationOptionsForModel({
+      modelType: 'video',
+      modelKey: 'comfyui::minimax-h3-r2v',
+      capabilities: {
+        video: {
+          generationModeOptions: ['normal'],
+          durationOptions: [5, 10, 15],
+          fpsOptions: [24],
+        },
+      },
+      capabilityDefaults: {
+        'comfyui::minimax-h3-r2v': { duration: 5 },
+      },
+      requireAllFields: true,
+    })
+
+    expect(result.issues).toEqual([])
+    expect(result.options).toEqual({ generationMode: 'normal', duration: 5, fps: 24 })
+  })
+})
+

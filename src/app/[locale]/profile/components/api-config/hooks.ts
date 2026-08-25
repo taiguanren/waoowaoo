@@ -23,6 +23,10 @@ import {
     DEFAULT_VIDEO_WORKFLOW_CONCURRENCY,
     normalizeWorkflowConcurrencyValue,
 } from '@/lib/workflow-concurrency'
+import {
+    replaceModelKeyInDefaults,
+    type ModelKeyRename,
+} from '@/lib/api-config/model-defaults'
 
 interface DefaultModels {
     analysisModel?: string
@@ -373,6 +377,7 @@ export function useProviders(): UseProvidersReturn {
         defaultModels?: DefaultModels
         workflowConcurrency?: WorkflowConcurrency
         capabilityDefaults?: CapabilitySelections
+        modelRenames?: ModelKeyRename[]
     },
         optimistic = false,
         silent = false,
@@ -401,6 +406,9 @@ export function useProviders(): UseProvidersReturn {
                     defaultModels: currentDefaultModels,
                     workflowConcurrency: currentWorkflowConcurrency,
                     capabilityDefaults: currentCapabilityDefaults,
+                    ...(overrides?.modelRenames && overrides.modelRenames.length > 0
+                        ? { modelRenames: overrides.modelRenames }
+                        : {}),
                 }),
             })
             if (res.ok) {
@@ -675,38 +683,46 @@ export function useProviders(): UseProvidersReturn {
     }, [performSave])
 
     const updateModel = useCallback((modelKey: string, updates: Partial<CustomModel>, providerId?: string) => {
-        let nextModelKey = ''
-        setModels(prev => {
-            const next = prev.map(m => {
-                if (m.modelKey !== modelKey || (providerId ? m.provider !== providerId : false)) return m
-                const mergedProvider = updates.provider ?? m.provider
-                const mergedModelId = updates.modelId ?? m.modelId
-                nextModelKey = encodeModelKey(mergedProvider, mergedModelId)
-                return {
-                    ...m,
-                    ...updates,
-                    provider: mergedProvider,
-                    modelId: mergedModelId,
-                    modelKey: nextModelKey,
-                    name: updates.name ?? m.name,
-                    price: updates.price ?? m.price,
-                }
-            })
-            latestModelsRef.current = next
-            return next
+        const currentModel = latestModelsRef.current.find((model) =>
+            model.modelKey === modelKey && (providerId ? model.provider === providerId : true),
+        )
+        if (!currentModel) return
+
+        const mergedProvider = updates.provider ?? currentModel.provider
+        const mergedModelId = updates.modelId ?? currentModel.modelId
+        const nextModelKey = encodeModelKey(mergedProvider, mergedModelId)
+        const nextModels = latestModelsRef.current.map((model) => {
+            if (model.modelKey !== modelKey || (providerId ? model.provider !== providerId : false)) return model
+            return {
+                ...model,
+                ...updates,
+                provider: mergedProvider,
+                modelId: mergedModelId,
+                modelKey: nextModelKey,
+                name: updates.name ?? model.name,
+                price: updates.price ?? model.price,
+            }
         })
-        if (nextModelKey && nextModelKey !== modelKey) {
-            setDefaultModels(prev => {
-                const next = { ...prev }
-                    ; (['analysisModel', 'characterModel', 'locationModel', 'storyboardModel', 'editModel', 'videoModel', 'audioModel', 'lipSyncModel', 'voiceDesignModel'] as const)
-                        .forEach(field => {
-                            if (next[field] === modelKey) next[field] = nextModelKey
-                        })
-                latestDefaultModelsRef.current = next
-                return next
-            })
+        latestModelsRef.current = nextModels
+        setModels(nextModels)
+
+        const nextDefaults = replaceModelKeyInDefaults(
+            latestDefaultModelsRef.current,
+            modelKey,
+            nextModelKey,
+        )
+        if (nextDefaults !== latestDefaultModelsRef.current) {
+            latestDefaultModelsRef.current = nextDefaults
+            setDefaultModels(nextDefaults)
         }
-        void performSave(undefined, false)
+
+        // Persist the model rename and any migrated defaults in one request.
+        void performSave({
+            defaultModels: nextDefaults,
+            ...(nextModelKey !== modelKey
+                ? { modelRenames: [{ from: modelKey, to: nextModelKey }] }
+                : {}),
+        }, false)
     }, [performSave])
 
     const addModel = useCallback((model: Omit<CustomModel, 'enabled'>) => {

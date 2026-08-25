@@ -20,7 +20,10 @@ export function useStoryboardGroupTaskErrors({
   const panelFailedTasksQuery = useTaskList({
     projectId,
     targetType: 'NovelPromotionPanel',
-    statuses: ['failed'],
+    type: ['image_panel', 'panel_variant', 'modify_asset_image'],
+    // Load the complete recent terminal/active history so an older failed
+    // task cannot mask a newer completed generation for the same panel.
+    statuses: ['queued', 'processing', 'completed', 'failed', 'canceled'],
     limit: 200,
     enabled: !!projectId,
   })
@@ -29,19 +32,23 @@ export function useStoryboardGroupTaskErrors({
 
   const panelTaskErrorMap = useMemo(() => {
     const map = new Map<string, { taskId: string; message: string }>()
+    const seenTargets = new Set<string>()
     for (const task of panelFailedTasksQuery.data || []) {
+      // queryTasks is ordered newest-first. The first task per panel is the
+      // current state; only expose an error when that current task failed.
+      if (seenTargets.has(task.targetId)) continue
+      seenTargets.add(task.targetId)
+      if (task.status !== 'failed') continue
       const display = resolveErrorDisplay(task.error || null)
       if (!display) continue
-      if (!map.has(task.targetId)) {
-        map.set(task.targetId, { taskId: task.id, message: display.message })
-      }
+      map.set(task.targetId, { taskId: task.id, message: display.message })
     }
     return map
   }, [panelFailedTasksQuery.data])
 
   const clearPanelTaskError = useCallback((panelId: string) => {
     const taskIds = (panelFailedTasksQuery.data || [])
-      .filter((task) => task.targetId === panelId)
+      .filter((task) => task.targetId === panelId && task.status === 'failed')
       .map((task) => task.id)
     if (taskIds.length === 0) return
     dismissMutation.mutate(taskIds)

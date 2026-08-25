@@ -50,4 +50,18 @@ describe('async poll externalId contract', () => {
     expect(parsed.type).toBe('IMAGE')
     expect(parsed.requestId).toBe('task_456')
   })
+
+  it('parses and formats COMFYUI externalId', () => {
+    const externalId = formatExternalId('COMFYUI', 'VIDEO', 'request-789')
+    expect(externalId).toBe('COMFYUI:VIDEO:request-789')
+
+    const parsed = parseExternalId(externalId)
+    expect(parsed.provider).toBe('COMFYUI')
+    expect(parsed.type).toBe('VIDEO')
+    expect(parsed.requestId).toBe('request-789')
+  })
+
+  it('mentions COMFYUI in unsupported externalId errors', () => {
+    expect(() => parseExternalId('UNKNOWN:IMAGE:request-1')).toThrow(/COMFYUI:TYPE:requestId/)
+  })
 })

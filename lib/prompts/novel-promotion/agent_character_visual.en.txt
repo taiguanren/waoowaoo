@@ -6,6 +6,7 @@ Character profiles JSON:
 
 Rules:
 1. Keep identity consistency with profile fields.
+2. Treat source_evidence as hard evidence from the screenplay. When it conflicts with profile-derived styling, preserve the screenplay's explicit age, clothing, hair, shoes, accessories, body features, and identity.
 2. Convert personality/social identity into visual details (face, hair, outfit, accessories).
 3. Support both human and non-human characters.
 4. Respect era_period and costume_tier.
@@ -43,3 +44,5 @@ Strict constraints:
 2. Keep names exactly aligned with input profiles.
 3. Each descriptions array must contain at least 3 valid English strings.
 4. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+
+source_evidence is screenplay evidence embedded in Character profiles. Do not invent or beautify clothing, occupation, height, accessories, or facial features absent from the evidence. Do not turn a character into a suit, formalwear, luxury outfit, or other archetype-driven design unless the screenplay explicitly says so.

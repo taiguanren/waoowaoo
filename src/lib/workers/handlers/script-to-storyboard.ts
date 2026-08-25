@@ -273,47 +273,82 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
                   throw new Error(`Retry clip not found: ${retryTarget.clipId}`)
                 }
                 const clip = clips[clipIndex]
-                const atomicResult = await runScriptToStoryboardAtomicRetry({
-                  runId,
-                  retryTarget,
-                  retryStepAttempt,
-                  locale: job.data.locale,
-                  clip: {
-                    id: clip.id,
-                    content: clip.content,
-                    characters: clip.characters,
-                    location: clip.location,
-                    props: readNullableText(clip as unknown as Record<string, unknown>, 'props'),
-                    screenplay: clip.screenplay,
-                  },
-                  clipIndex,
-                  totalClipCount: clips.length,
-                  novelPromotionData: {
-                    characters: novelData.characters || [],
-                    locations: (novelData.locations || []).filter((item) => readAssetKind(item as unknown as Record<string, unknown>) !== 'prop'),
-                    props: (novelData.locations || [])
-                      .filter((item) => readAssetKind(item as unknown as Record<string, unknown>) === 'prop')
-                      .map((item) => ({ name: item.name, summary: item.summary })),
-                  },
-                  promptTemplates: {
-                    phase1PlanTemplate,
-                    phase2CinematographyTemplate,
-                    phase2ActingTemplate,
-                    phase3DetailTemplate,
-                  },
-                  runStep,
-                })
-                return {
-                  clipPanels: atomicResult.clipPanels,
-                  phase1PanelsByClipId: atomicResult.phase1PanelsByClipId,
-                  phase2CinematographyByClipId: atomicResult.phase2CinematographyByClipId,
-                  phase2ActingByClipId: atomicResult.phase2ActingByClipId,
-                  phase3PanelsByClipId: atomicResult.phase3PanelsByClipId,
-                  summary: {
-                    clipCount: selectedClips.length,
-                    totalPanelCount: atomicResult.totalPanelCount,
-                    totalStepCount: atomicResult.totalStepCount,
-                  },
+                try {
+                  const atomicResult = await runScriptToStoryboardAtomicRetry({
+                    runId,
+                    retryTarget,
+                    retryStepAttempt,
+                    locale: job.data.locale,
+                    clip: {
+                      id: clip.id,
+                      content: clip.content,
+                      characters: clip.characters,
+                      location: clip.location,
+                      props: readNullableText(clip as unknown as Record<string, unknown>, 'props'),
+                      screenplay: clip.screenplay,
+                    },
+                    clipIndex,
+                    totalClipCount: clips.length,
+                    novelPromotionData: {
+                      characters: novelData.characters || [],
+                      locations: (novelData.locations || []).filter((item) => readAssetKind(item as unknown as Record<string, unknown>) !== 'prop'),
+                      props: (novelData.locations || [])
+                        .filter((item) => readAssetKind(item as unknown as Record<string, unknown>) === 'prop')
+                        .map((item) => ({ name: item.name, summary: item.summary })),
+                    },
+                    promptTemplates: {
+                      phase1PlanTemplate,
+                      phase2CinematographyTemplate,
+                      phase2ActingTemplate,
+                      phase3DetailTemplate,
+                    },
+                    runStep,
+                  })
+                  return {
+                    clipPanels: atomicResult.clipPanels,
+                    phase1PanelsByClipId: atomicResult.phase1PanelsByClipId,
+                    phase2CinematographyByClipId: atomicResult.phase2CinematographyByClipId,
+                    phase2ActingByClipId: atomicResult.phase2ActingByClipId,
+                    phase3PanelsByClipId: atomicResult.phase3PanelsByClipId,
+                    summary: {
+                      clipCount: selectedClips.length,
+                      totalPanelCount: atomicResult.totalPanelCount,
+                      totalStepCount: atomicResult.totalStepCount,
+                    },
+                  }
+                } catch (error) {
+                  // Older failed runs can lack downstream typed artifacts even
+                  // though their step output exists. Rebuild this clip from
+                  // the source instead of retrying against an incomplete graph.
+                  if (!(error instanceof Error) || !error.message.toLowerCase().includes('missing dependency artifact')) {
+                    throw error
+                  }
+                  return await runScriptToStoryboardOrchestrator({
+                    concurrency: 1,
+                    locale: job.data.locale,
+                    clips: [clip].map((item) => ({
+                      id: item.id,
+                      content: item.content,
+                      characters: item.characters,
+                      location: item.location,
+                      props: readNullableText(item as unknown as Record<string, unknown>, 'props'),
+                      screenplay: item.screenplay,
+                    })),
+                    novelPromotionData: {
+                      characters: novelData.characters || [],
+                      locations: (novelData.locations || []).filter((item) => readAssetKind(item as unknown as Record<string, unknown>) !== 'prop'),
+                      props: (novelData.locations || [])
+                        .filter((item) => readAssetKind(item as unknown as Record<string, unknown>) === 'prop')
+                        .map((item) => ({ name: item.name, summary: item.summary })),
+                    },
+                    promptTemplates: {
+                      phase1PlanTemplate,
+                      phase2CinematographyTemplate,
+                      phase2ActingTemplate,
+                      phase3DetailTemplate,
+                    },
+                    runStep,
+                  })
                 }
               }
 

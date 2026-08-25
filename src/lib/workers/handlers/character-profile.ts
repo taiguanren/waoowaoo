@@ -9,6 +9,7 @@ import { assertTaskActive } from '@/lib/workers/utils'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import {
   type AnyObj,
+  collectCharacterSourceEvidence,
   parseVisualResponse,
   readRequiredString,
   readText,
@@ -58,6 +59,10 @@ async function handleConfirmProfile(
   }
 
   const parsedProfile = JSON.parse(finalProfileData) as AnyObj
+  const sourceEvidence = collectCharacterSourceEvidence(
+    character.name,
+    project.novelPromotionData!.episodes || [],
+  )
   const promptTemplate = buildPrompt({
     promptId: PROMPT_IDS.NP_AGENT_CHARACTER_VISUAL,
     locale: job.data.locale,
@@ -66,6 +71,8 @@ async function handleConfirmProfile(
         [
           {
             name: character.name,
+            introduction: character.introduction || '',
+            source_evidence: sourceEvidence,
             ...parsedProfile,
           },
         ],

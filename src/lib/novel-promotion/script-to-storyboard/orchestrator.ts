@@ -199,6 +199,17 @@ function mergePanelsWithRules(params: {
   })
 }
 
+function requirePanelCoverage<T extends JsonRecord>(rows: T[], panels: StoryboardPanel[], label: string): T[] {
+  const available = new Set(rows.map((row) => row.panel_number).filter((value): value is number => typeof value === 'number'))
+  const missing = panels
+    .map((panel) => panel.panel_number)
+    .filter((panelNumber): panelNumber is number => typeof panelNumber === 'number' && !available.has(panelNumber))
+  if (missing.length > 0) {
+    throw new Error(`Missing panel_number in ${label}: ${missing.join(',')}`)
+  }
+  return rows
+}
+
 const MAX_STEP_ATTEMPTS = 3
 const MAX_RETRY_DELAY_MS = 10_000
 
@@ -224,6 +235,7 @@ function shouldRetryStepError(error: unknown, message: string, retryable: boolea
     || lowerMessage.includes('json format invalid')
     || lowerMessage.includes('invalid json output')
     || lowerMessage.includes('parse')
+    || lowerMessage.includes('missing panel_number')
 }
 
 async function runStepWithRetry<T>(
@@ -428,11 +440,13 @@ export async function runScriptToStoryboardOrchestrator(
         .replace('{locations_description}', filteredLocationsDescription)
         .replace('{characters_info}', filteredFullDescription)
         .replace('{props_description}', filteredPropsDescription)
+        + `\n\nRequired panel_number values (return every one exactly once): ${planPanels.map((panel) => panel.panel_number).join(', ')}`
 
       const phase2ActingPrompt = promptTemplates.phase2ActingTemplate
         .replace('{panels_json}', JSON.stringify(planPanels, null, 2))
         .replace(/\{panel_count\}/g, String(planPanels.length))
         .replace('{characters_info}', filteredFullDescription)
+        + `\n\nRequired panel_number values (return every one exactly once): ${planPanels.map((panel) => panel.panel_number).join(', ')}`
 
       const phase3Prompt = promptTemplates.phase3DetailTemplate
         .replace('{panels_json}', JSON.stringify(planPanels, null, 2))
@@ -446,11 +460,19 @@ export async function runScriptToStoryboardOrchestrator(
       ] = await Promise.all([
         runStepWithRetry(
           runStep, phase2Meta, phase2Prompt, 'storyboard_phase2_cinematography', 2400,
-          (text) => parseJsonArray<PhotographyRule>(text, `phase2:${formatClipId(clip)}`),
+          (text) => requirePanelCoverage(
+            parseJsonArray<PhotographyRule>(text, `phase2:${formatClipId(clip)}`),
+            planPanels,
+            'cinematography',
+          ),
         ),
         runStepWithRetry(
           runStep, phase2ActingMeta, phase2ActingPrompt, 'storyboard_phase2_acting', 2400,
-          (text) => parseJsonArray<ActingDirection>(text, `phase2-acting:${formatClipId(clip)}`),
+          (text) => requirePanelCoverage(
+            parseJsonArray<ActingDirection>(text, `phase2-acting:${formatClipId(clip)}`),
+            planPanels,
+            'acting direction',
+          ),
         ),
       ])
       const { parsed: filteredPhase3Panels } = await runStepWithRetry(

@@ -84,7 +84,7 @@ export default function CharacterCardActions(props: CharacterCardActionsProps) {
             options={getImageGenerationCountOptions('character')}
             onValueChange={props.onGenerationCountChange}
             onClick={() => props.onGenerate(props.generationCount)}
-            disabled={!props.hasDescription}
+            actionDisabled={!props.hasDescription}
             ariaLabel={t('image.selectCount')}
             className={`glass-btn-base flex w-full items-center justify-center gap-1 py-1 text-xs disabled:opacity-50 ${props.isPrimaryAppearance ? 'glass-btn-primary' : 'glass-btn-tone-info'}`}
             selectClassName="appearance-none bg-transparent border-0 pl-0 pr-3 text-xs font-semibold text-current outline-none cursor-pointer leading-none transition-colors"

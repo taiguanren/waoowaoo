@@ -78,7 +78,16 @@ describe('worker character-image-task-handler behavior', () => {
       selectedIndex: 0,
       imageUrl: null,
       changeReason: '战斗形态',
-      character: { name: 'Hero' },
+      character: {
+        name: 'Hero',
+        profileData: JSON.stringify({
+          gender: '男',
+          age_range: '约四十七岁',
+          era_period: '现代都市',
+          primary_identifier: '血丝眼、左耳单边入耳耳机',
+          suggested_colors: ['灰蓝', '深灰'],
+        }),
+      },
     })
 
     prismaMock.characterAppearance.findFirst.mockResolvedValue({
@@ -111,6 +120,8 @@ describe('worker character-image-task-handler behavior', () => {
 
     expect(generationInput.prompt).toContain(CHARACTER_PROMPT_SUFFIX)
     expect(generationInput.prompt).toContain(realisticStylePrompt)
+    expect(generationInput.prompt).toContain('年龄：约四十七岁')
+    expect(generationInput.prompt).toContain('核心识别标志：血丝眼、左耳单边入耳耳机')
     expect(generationInput.prompt.split(CHARACTER_PROMPT_SUFFIX).length - 1).toBe(1)
     expect(generationInput.prompt.split(realisticStylePrompt).length - 1).toBe(1)
     expect(generationInput.label).toBe('Hero - 战斗形态')

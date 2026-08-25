@@ -35,17 +35,34 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
 
   return (
     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
-      {hasVisibleBaseVideo && player.isPlaying ? (
+      {hasVisibleBaseVideo && (
         <video
           ref={player.videoRef}
           key={`video-${panel.storyboardId}-${panel.panelIndex}-${media.currentVideoUrl}`}
           src={media.currentVideoUrl}
           controls
+          preload="metadata"
           playsInline
-          className="w-full h-full object-contain bg-black"
+          className={player.isPlaying
+            ? 'w-full h-full object-contain bg-black'
+            : 'absolute inset-0 w-full h-full object-contain bg-black opacity-0 pointer-events-none'}
+          onLoadedMetadata={player.handleVideoLoadedMetadata}
           onEnded={() => player.setIsPlaying(false)}
         />
-      ) : hasVisibleBaseVideo ? (
+      )}
+      {!hasVisibleBaseVideo ? (
+        panel.imageUrl ? (
+          <MediaImageWithLoading
+            src={panel.imageUrl}
+            alt={t('panelCard.shot', { number: panelIndex + 1 })}
+            containerClassName="w-full h-full bg-[var(--glass-bg-muted)]"
+            className={`w-full h-full object-contain bg-[var(--glass-bg-muted)] ${media.onPreviewImage ? 'cursor-zoom-in' : ''}`}
+            onClick={media.onPreviewImage ? player.handlePreviewImage : undefined}
+          />
+        ) : (
+          <AppIcon name="playCircle" className="w-16 h-16 text-[var(--glass-text-tertiary)]" />
+        )
+      ) : !player.isPlaying ? (
         <div
           className="relative w-full h-full group cursor-pointer"
           onClick={() => void player.handlePlayClick()}
@@ -62,17 +79,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
             </div>
           </div>
         </div>
-      ) : panel.imageUrl ? (
-        <MediaImageWithLoading
-          src={panel.imageUrl}
-          alt={t('panelCard.shot', { number: panelIndex + 1 })}
-          containerClassName="w-full h-full bg-[var(--glass-bg-muted)]"
-          className={`w-full h-full object-contain bg-[var(--glass-bg-muted)] ${media.onPreviewImage ? 'cursor-zoom-in' : ''}`}
-          onClick={media.onPreviewImage ? player.handlePreviewImage : undefined}
-        />
-      ) : (
-        <AppIcon name="playCircle" className="w-16 h-16 text-[var(--glass-text-tertiary)]" />
-      )}
+      ) : null}
 
       {/* 镜头编号 */}
       <div className="absolute top-2 left-2 bg-[var(--glass-overlay)] text-white px-2 py-0.5 rounded text-xs font-medium">

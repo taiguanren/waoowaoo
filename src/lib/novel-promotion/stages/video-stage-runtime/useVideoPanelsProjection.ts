@@ -10,6 +10,7 @@ import type {
 interface TaskStateLike {
   phase?: string | null
   lastError?: { code?: string; message?: string } | null
+  updatedAt?: string | null
 }
 
 interface TaskPresentationLike {
@@ -21,6 +22,23 @@ interface UseVideoPanelsProjectionParams {
   clips: Clip[]
   panelVideoStates: TaskPresentationLike
   panelLipStates: TaskPresentationLike
+}
+
+function toTimestamp(value: string | Date | null | undefined) {
+  if (!value) return null
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function outputSupersedesFailedTask(
+  outputUrl: string | null | undefined,
+  outputUpdatedAt: string | Date | null | undefined,
+  taskState: TaskStateLike | null,
+) {
+  if (!outputUrl || taskState?.phase !== 'failed') return false
+  const outputTimestamp = toTimestamp(outputUpdatedAt)
+  const taskTimestamp = toTimestamp(taskState.updatedAt)
+  return outputTimestamp !== null && taskTimestamp !== null && outputTimestamp > taskTimestamp
 }
 
 export function useVideoPanelsProjection({
@@ -56,6 +74,12 @@ export function useVideoPanelsProjection({
         const panelId = panel.id
         const panelVideoState = panelId ? panelVideoStates.getTaskState(`panel-video:${panelId}`) : null
         const panelLipState = panelId ? panelLipStates.getTaskState(`panel-lip:${panelId}`) : null
+        const videoErrorSuperseded =
+          panelVideoState?.phase === 'completed' ||
+          outputSupersedesFailedTask(panel.videoUrl, panel.updatedAt, panelVideoState)
+        const lipSyncErrorSuperseded =
+          panelLipState?.phase === 'completed' ||
+          outputSupersedesFailedTask(panel.lipSyncVideoUrl, panel.updatedAt, panelLipState)
 
         panels.push({
           panelId,
@@ -80,11 +104,15 @@ export function useVideoPanelsProjection({
           videoGenerationMode: panel.videoGenerationMode || undefined,
           videoTaskRunning: panelVideoState?.phase === 'queued' || panelVideoState?.phase === 'processing',
           videoErrorCode:
-            panelVideoState?.phase === 'failed'
+            videoErrorSuperseded
+              ? undefined
+              : panelVideoState?.phase === 'failed'
               ? panelVideoState.lastError?.code || panel.videoErrorCode || undefined
               : panel.videoErrorCode || undefined,
           videoErrorMessage:
-            panelVideoState?.phase === 'failed'
+            videoErrorSuperseded
+              ? undefined
+              : panelVideoState?.phase === 'failed'
               ? panelVideoState.lastError?.message || panel.videoErrorMessage || undefined
               : panel.videoErrorMessage || undefined,
           videoModel: panel.videoModel || undefined,
@@ -92,11 +120,15 @@ export function useVideoPanelsProjection({
           lipSyncVideoUrl: panel.lipSyncVideoUrl || undefined,
           lipSyncTaskRunning: panelLipState?.phase === 'queued' || panelLipState?.phase === 'processing',
           lipSyncErrorCode:
-            panelLipState?.phase === 'failed'
+            lipSyncErrorSuperseded
+              ? undefined
+              : panelLipState?.phase === 'failed'
               ? panelLipState.lastError?.code || panel.lipSyncErrorCode || undefined
               : panel.lipSyncErrorCode || undefined,
           lipSyncErrorMessage:
-            panelLipState?.phase === 'failed'
+            lipSyncErrorSuperseded
+              ? undefined
+              : panelLipState?.phase === 'failed'
               ? panelLipState.lastError?.message || panel.lipSyncErrorMessage || undefined
               : panel.lipSyncErrorMessage || undefined,
         })

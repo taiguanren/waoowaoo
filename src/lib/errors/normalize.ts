@@ -143,9 +143,9 @@ function inferCodeFromMessage(message: string): UnifiedErrorCode | null {
     return explicitMatch[1]
   }
 
-  const statusMatch = message.match(/\bstatus\s+(\d{3})\b/)
+  const statusMatch = message.match(/\bstatus\s+(\d{3})\b|\b(\d{3})\s+status(?:\s+code)?\b/)
   if (statusMatch) {
-    const parsedStatus = Number.parseInt(statusMatch[1] || '', 10)
+    const parsedStatus = Number.parseInt(statusMatch[1] || statusMatch[2] || '', 10)
     if (Number.isFinite(parsedStatus)) {
       if (parsedStatus === 404 || parsedStatus === 405 || parsedStatus === 415) {
         return 'VIDEO_API_FORMAT_UNSUPPORTED'
@@ -157,7 +157,7 @@ function inferCodeFromMessage(message: string): UnifiedErrorCode | null {
       if (parsedStatus === 422) return 'SENSITIVE_CONTENT'
       if (parsedStatus === 429) return 'RATE_LIMIT'
       if (parsedStatus === 502 || parsedStatus === 503) return 'EXTERNAL_ERROR'
-      if (parsedStatus === 504) return 'GENERATION_TIMEOUT'
+      if (parsedStatus === 504 || parsedStatus === 524) return 'GENERATION_TIMEOUT'
       if (parsedStatus >= 500) return 'EXTERNAL_ERROR'
       if (parsedStatus >= 400) return 'INVALID_PARAMS'
     }
@@ -275,7 +275,7 @@ export function normalizeAnyError(input: unknown, options: NormalizeOptions = {}
     if (errorLike.status === 422) return buildNormalizedError('SENSITIVE_CONTENT', message, options.details, provider)
     if (errorLike.status === 429) return buildNormalizedError('RATE_LIMIT', message, options.details, provider)
     if (errorLike.status === 502 || errorLike.status === 503) return buildNormalizedError('EXTERNAL_ERROR', message, options.details, provider)
-    if (errorLike.status === 504) return buildNormalizedError('GENERATION_TIMEOUT', message, options.details, provider)
+    if (errorLike.status === 504 || errorLike.status === 524) return buildNormalizedError('GENERATION_TIMEOUT', message, options.details, provider)
   }
 
   const inferredCode = inferCodeFromMessage(lowerMessage)

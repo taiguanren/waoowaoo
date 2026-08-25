@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { setProxy } from '../../../lib/prompts/proxy'
+import { probeComfyUiConnection } from '@/lib/providers/comfyui'
 
 export type TestStepName = 'models' | 'textGen' | 'imageGen' | 'credits' | 'audioGen'
 export type TestStepStatus = 'pass' | 'fail' | 'skip'
@@ -20,6 +21,7 @@ export interface TestProviderResult {
 type PresetProviderType = 'ark' | 'google' | 'openrouter' | 'minimax' | 'fal' | 'vidu'
   | 'bailian'
   | 'siliconflow'
+  | 'comfyui'
 type CompatibleProviderType = 'openai-compatible' | 'gemini-compatible'
 
 type TestProviderPayload = {
@@ -828,6 +830,29 @@ async function testBailianProvider(apiKey: string): Promise<TestProviderResult> 
   }
 }
 
+async function testComfyUiProvider(baseUrl: string, apiKey: string): Promise<TestProviderResult> {
+  try {
+    const result = await probeComfyUiConnection({ baseUrl, apiToken: apiKey })
+    return {
+      success: true,
+      steps: [{
+        name: 'models',
+        status: 'pass',
+        message: `ComfyUI queue reachable (${result.queueSize} queued)`,
+      }],
+    }
+  } catch (error) {
+    return {
+      success: false,
+      steps: [{
+        name: 'models',
+        status: 'fail',
+        message: toErrorMessage(error),
+      }],
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -843,7 +868,7 @@ export async function testProviderConnection(payload: TestProviderPayload): Prom
   }
 
   // Compatible providers require baseUrl
-  if ((apiType === 'openai-compatible' || apiType === 'gemini-compatible') && !baseUrl) {
+  if ((apiType === 'openai-compatible' || apiType === 'gemini-compatible' || apiType === 'comfyui') && !baseUrl) {
     return {
       success: false,
       steps: [{ name: 'models', status: 'fail', message: 'Missing baseUrl' }],
@@ -871,6 +896,8 @@ export async function testProviderConnection(payload: TestProviderPayload): Prom
       return testBailianProvider(apiKey)
     case 'siliconflow':
       return testSiliconFlowProvider(apiKey)
+    case 'comfyui':
+      return testComfyUiProvider(baseUrl!, apiKey)
     default:
       return {
         success: false,
@@ -885,6 +912,9 @@ export async function testProviderConnection(payload: TestProviderPayload): Prom
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
+    if (error.message.startsWith('COMFYUI_NETWORK_ERROR:')) {
+      return error.message.slice('COMFYUI_NETWORK_ERROR:'.length).trim().slice(0, 200)
+    }
     // Clean up OpenAI SDK errors
     if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND'))
       return 'Network error — check your internet connection / 网络连接失败，请检查网络后重试'

@@ -4,6 +4,30 @@ import { getInternalBaseUrl } from '@/lib/env'
 import { getImageBase64Cached } from '@/lib/image-cache'
 import type { OpenAICompatClientConfig } from '../types'
 
+const DEFAULT_RESPONSES_TIMEOUT_MS = 90_000
+
+export function getOpenAICompatResponsesTimeoutMs(): number {
+  const raw = Number.parseInt(process.env.OPENAI_COMPAT_RESPONSES_TIMEOUT_MS || '', 10)
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_RESPONSES_TIMEOUT_MS
+  return Math.max(10_000, Math.min(raw, 300_000))
+}
+
+export function shouldFallbackFromOpenAICompatResponses(error: unknown): boolean {
+  const record = error && typeof error === 'object' ? error as Record<string, unknown> : null
+  const status = typeof record?.status === 'number' ? record.status : undefined
+  if (typeof status === 'number') return status >= 500
+
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : String(error).toLowerCase()
+  return message.includes('timeout')
+    || message.includes('aborted')
+    || message.includes('524')
+    || message.includes('502')
+    || message.includes('503')
+    || message.includes('504')
+}
+
 function toAbsoluteUrlIfNeeded(value: string): string {
   if (!value.startsWith('/')) return value
   const baseUrl = getInternalBaseUrl()

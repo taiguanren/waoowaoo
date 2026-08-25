@@ -8,6 +8,12 @@ describe('api-config minimax preset', () => {
     expect(minimaxProvider?.baseUrl).toBe('https://api.minimaxi.com/v1')
   })
 
+  it('does not ship an ephemeral ComfyUI tunnel as a default endpoint', () => {
+    const comfyUiProvider = PRESET_PROVIDERS.find((provider) => provider.id === 'comfyui')
+    expect(comfyUiProvider).toBeDefined()
+    expect(comfyUiProvider?.baseUrl).toBeUndefined()
+  })
+
   it('includes all required minimax official llm preset models', () => {
     const minimaxLlmModelIds = PRESET_MODELS
       .filter((model) => model.provider === 'minimax' && model.type === 'llm')

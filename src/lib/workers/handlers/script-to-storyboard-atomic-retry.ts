@@ -119,7 +119,9 @@ function parseJsonArray<T extends JsonRecord>(responseText: string, label: strin
 function shouldRetryStepError(error: unknown, message: string, retryable: boolean) {
   if (retryable) return true
   const lowerMessage = message.toLowerCase()
-  return lowerMessage.includes('json') || lowerMessage.includes('parse')
+  return lowerMessage.includes('json')
+    || lowerMessage.includes('parse')
+    || lowerMessage.includes('missing panel_number')
 }
 
 function computeRetryDelayMs(attempt: number) {
@@ -138,6 +140,16 @@ function extractArtifactRows<T extends JsonRecord>(payload: unknown, key: string
   return asObjectArray(record[key]) as T[]
 }
 
+function extractStepOutputRows<T extends JsonRecord>(payload: unknown): T[] {
+  const record = asObject(payload)
+  if (!record || typeof record.output !== 'string') return []
+  try {
+    return parseJsonArray<T>(record.output, 'step.output')
+  } catch {
+    return []
+  }
+}
+
 async function readArtifactRows<T extends JsonRecord>(params: {
   runId: string
   clipId: string
@@ -151,8 +163,36 @@ async function readArtifactRows<T extends JsonRecord>(params: {
     limit: 1,
   })
   const artifact = rows[0]
-  if (!artifact) return []
-  return extractArtifactRows<T>(artifact.payload, params.key)
+  if (artifact) return extractArtifactRows<T>(artifact.payload, params.key)
+
+  // A failed run may have projected completed LLM output before typed phase
+  // artifacts were persisted. Reuse that output for an atomic step retry.
+  const phaseByArtifactType: Record<string, string> = {
+    'storyboard.clip.phase1': 'phase1',
+    'storyboard.clip.phase2.cine': 'phase2_cinematography',
+    'storyboard.clip.phase2.acting': 'phase2_acting',
+    'storyboard.clip.phase3': 'phase3_detail',
+  }
+  const phase = phaseByArtifactType[params.artifactType]
+  if (!phase) return []
+  const stepOutputs = await listArtifacts({
+    runId: params.runId,
+    artifactType: 'step.output',
+    refId: `clip_${params.clipId}_${phase}`,
+    limit: 1,
+  })
+  return stepOutputs[0] ? extractStepOutputRows<T>(stepOutputs[0].payload) : []
+}
+
+function requirePanelCoverage<T extends JsonRecord>(rows: T[], panels: StoryboardPanel[], label: string): T[] {
+  const available = new Set(rows.map((row) => row.panel_number).filter((value): value is number => typeof value === 'number'))
+  const missing = panels
+    .map((panel) => panel.panel_number)
+    .filter((panelNumber): panelNumber is number => typeof panelNumber === 'number' && !available.has(panelNumber))
+  if (missing.length > 0) {
+    throw new Error(`Missing panel_number in ${label}: ${missing.join(',')}`)
+  }
+  return rows
 }
 
 function getStepNumbers(params: {
@@ -458,13 +498,18 @@ export async function runScriptToStoryboardAtomicRetry(params: {
       .replace('{locations_description}', filteredLocationsDescription)
       .replace('{characters_info}', filteredFullDescription)
       .replace('{props_description}', filteredPropsDescription)
+      + `\n\nRequired panel_number values (return every one exactly once): ${planPanels.map((panel) => panel.panel_number).join(', ')}`
     phase2Cinematography = await runStepWithRetry({
       runStep: params.runStep,
       baseMeta,
       prompt: phase2Prompt,
       action: 'storyboard_phase2_cinematography',
       maxOutputTokens: 2400,
-      parse: (text) => parseJsonArray<PhotographyRule>(text, `phase2:${formatClipId(params.clip)}`),
+      parse: (text) => requirePanelCoverage(
+        parseJsonArray<PhotographyRule>(text, `phase2:${formatClipId(params.clip)}`),
+        planPanels,
+        'cinematography',
+      ),
       retryStepAttempt: params.retryStepAttempt,
     })
     phase2CinematographyByClipId[params.clip.id] = phase2Cinematography
@@ -474,13 +519,18 @@ export async function runScriptToStoryboardAtomicRetry(params: {
       .replace('{panels_json}', JSON.stringify(planPanels, null, 2))
       .replace(/\{panel_count\}/g, String(planPanels.length))
       .replace('{characters_info}', filteredFullDescription)
+      + `\n\nRequired panel_number values (return every one exactly once): ${planPanels.map((panel) => panel.panel_number).join(', ')}`
     phase2Acting = await runStepWithRetry({
       runStep: params.runStep,
       baseMeta,
       prompt: phase2ActingPrompt,
       action: 'storyboard_phase2_acting',
       maxOutputTokens: 2400,
-      parse: (text) => parseJsonArray<ActingDirection>(text, `phase2-acting:${formatClipId(params.clip)}`),
+      parse: (text) => requirePanelCoverage(
+        parseJsonArray<ActingDirection>(text, `phase2-acting:${formatClipId(params.clip)}`),
+        planPanels,
+        'acting direction',
+      ),
       retryStepAttempt: params.retryStepAttempt,
     })
     phase2ActingByClipId[params.clip.id] = phase2Acting

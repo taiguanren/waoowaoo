@@ -21,6 +21,7 @@ type UserPreferenceSnapshot = {
   analysisConcurrency?: number | null
   imageConcurrency?: number | null
   videoConcurrency?: number | null
+  voiceDesignModel?: string | null
 }
 
 type SavedProvider = {
@@ -37,6 +38,12 @@ const prismaMock = vi.hoisted(() => ({
   userPreference: {
     findUnique: vi.fn<(...args: unknown[]) => Promise<UserPreferenceSnapshot | null>>(),
     upsert: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  },
+  project: {
+    findMany: vi.fn<(...args: unknown[]) => Promise<Array<{ id: string }>>>(),
+  },
+  novelPromotionProject: {
+    updateMany: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   },
 }))
 
@@ -1294,5 +1301,105 @@ describe('api specific - user api-config PUT provider uniqueness', () => {
       },
     })
     expect(savedModel?.compatMediaTemplateSource).toBe('ai')
+  })
+
+  it('persists ComfyUI provider and workflow models without changing existing providers', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/user/api-config/route')
+
+    const comfyModels = [
+      { modelId: 'z-image-turbo', name: 'Z-Image Turbo', type: 'image' },
+      { modelId: 'minimax-h3-i2v', name: 'MiniMax H3 I2V', type: 'video' },
+      { modelId: 'minimax-h3-r2v', name: 'MiniMax H3 R2V', type: 'video' },
+      { modelId: 'minimax-h3-t2v', name: 'MiniMax H3 T2V', type: 'video' },
+    ]
+    const req = buildMockRequest({
+      path: '/api/user/api-config',
+      method: 'PUT',
+      body: {
+        providers: [
+          { id: 'fal', name: 'FAL', apiKey: 'fal-key' },
+          {
+            id: 'comfyui',
+            name: 'ComfyUI Workflow API',
+            baseUrl: 'https://comfy.example',
+            apiKey: 'comfy-token',
+          },
+        ],
+        models: comfyModels.map((model) => ({
+          ...model,
+          provider: 'comfyui',
+          modelKey: `comfyui::${model.modelId}`,
+        })),
+        defaultModels: {
+          characterModel: 'comfyui::z-image-turbo',
+          videoModel: 'comfyui::minimax-h3-i2v',
+        },
+      },
+    })
+
+    const res = await route.PUT(req, routeContext)
+    expect(res.status).toBe(200)
+
+    const savedProviders = readSavedProvidersFromUpsert()
+    expect(savedProviders.map((provider) => provider.id)).toEqual(['fal', 'comfyui'])
+    expect(savedProviders[1]).toMatchObject({
+      name: 'ComfyUI Workflow API',
+      baseUrl: 'https://comfy.example',
+      apiKey: 'enc:comfy-token',
+      gatewayRoute: 'official',
+    })
+
+    const savedModels = readSavedModelsFromUpsert()
+    expect(savedModels.map((model) => model.modelKey)).toEqual([
+      'comfyui::z-image-turbo',
+      'comfyui::minimax-h3-i2v',
+      'comfyui::minimax-h3-r2v',
+      'comfyui::minimax-h3-t2v',
+    ])
+  })
+
+  it('migrates user and project references when a model key is explicitly renamed', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const oldKey = 'openai-compatible:gateway::grok-4.5'
+    const newKey = 'openai-compatible:gateway::grok-4.6'
+    prismaMock.userPreference.findUnique.mockResolvedValue({
+      customProviders: JSON.stringify([
+        { id: 'openai-compatible:gateway', name: 'Gateway', baseUrl: 'https://gateway.test/v1', apiKey: 'enc:key' },
+      ]),
+      customModels: JSON.stringify([
+        { modelId: 'grok-4.5', modelKey: oldKey, name: 'grok-4.5', type: 'llm', provider: 'openai-compatible:gateway', price: 0, llmProtocol: 'chat-completions' },
+      ]),
+      analysisModel: oldKey,
+    })
+    prismaMock.project.findMany.mockResolvedValue([{ id: 'project-1' }, { id: 'project-2' }])
+    const route = await import('@/app/api/user/api-config/route')
+
+    const req = buildMockRequest({
+      path: '/api/user/api-config',
+      method: 'PUT',
+      body: {
+        providers: [
+          { id: 'openai-compatible:gateway', name: 'Gateway', baseUrl: 'https://gateway.test/v1', apiKey: 'key' },
+        ],
+        models: [
+          { modelId: 'grok-4.6', modelKey: newKey, name: 'grok-4.6', type: 'llm', provider: 'openai-compatible:gateway', price: 0, llmProtocol: 'chat-completions' },
+        ],
+        defaultModels: { analysisModel: newKey },
+        modelRenames: [{ from: oldKey, to: newKey }],
+      },
+    })
+
+    const res = await route.PUT(req, routeContext)
+    expect(res.status).toBe(200)
+    const upsertPayload = prismaMock.userPreference.upsert.mock.calls[0]?.[0] as { update?: { analysisModel?: string } }
+    expect(upsertPayload.update?.analysisModel).toBe(newKey)
+    expect(prismaMock.project.findMany).toHaveBeenCalledWith({ where: { userId: 'user-1' }, select: { id: true } })
+    expect(prismaMock.novelPromotionProject.updateMany).toHaveBeenCalledWith({
+      where: { projectId: { in: ['project-1', 'project-2'] }, analysisModel: oldKey },
+      data: { analysisModel: newKey },
+    })
   })
 })

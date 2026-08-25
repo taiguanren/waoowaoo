@@ -2,7 +2,7 @@ import path from 'node:path'
 import { createScopedLogger } from '@/lib/logging/core'
 import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 
-type StorageHelpers = Pick<typeof import('@/lib/storage'), 'getSignedUrl' | 'toFetchableUrl'>
+type StorageHelpers = Pick<typeof import('@/lib/storage'), 'getObjectBuffer' | 'getSignedUrl' | 'toFetchableUrl'>
 
 type InputIssueReason =
   | 'next_image_unwrapped'
@@ -88,6 +88,7 @@ let storageHelpersPromise: Promise<StorageHelpers> | null = null
 async function getStorageHelpers(): Promise<StorageHelpers> {
   if (!storageHelpersPromise) {
     storageHelpersPromise = import('@/lib/storage').then((mod) => ({
+      getObjectBuffer: mod.getObjectBuffer,
       getSignedUrl: mod.getSignedUrl,
       toFetchableUrl: mod.toFetchableUrl,
     }))
@@ -387,7 +388,23 @@ export async function normalizeToOriginalMediaUrl(input: string): Promise<string
 }
 
 export async function normalizeToBase64ForGeneration(input: string): Promise<string> {
-  const normalizedUrl = await normalizeToOriginalMediaUrl(input)
+  const normalizedInput = normalizeInput(input)
+  const storageKey = await resolveStorageKeyFromMediaValue(normalizedInput)
+  if (storageKey) {
+    try {
+      const { getObjectBuffer } = await getStorageHelpers()
+      const buffer = await getObjectBuffer(storageKey)
+      const mimeType = guessContentType(storageKey, null, buffer)
+      return `data:${mimeType};base64,${buffer.toString('base64')}`
+    } catch (error) {
+      logger.warn({
+        message: 'direct storage read failed; falling back to fetchable URL',
+        details: { storageKey, error: error instanceof Error ? error.message : String(error) },
+      })
+    }
+  }
+
+  const normalizedUrl = await normalizeToOriginalMediaUrl(normalizedInput)
   if (isDataUrl(normalizedUrl)) {
     return normalizedUrl
   }

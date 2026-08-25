@@ -227,6 +227,10 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
             // 🔥 刷新缓存获取最新状态
             if (episodeId && projectId) {
                 queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                queryClient.invalidateQueries({
+                    queryKey: queryKeys.tasks.targetStatesAll(projectId),
+                    exact: false,
+                })
             }
         },
     })
@@ -277,6 +281,10 @@ export function useBatchGenerateVideos(projectId: string | null, episodeId: stri
             // 🔥 刷新缓存获取最新状态
             if (episodeId && projectId) {
                 queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                queryClient.invalidateQueries({
+                    queryKey: queryKeys.tasks.targetStatesAll(projectId),
+                    exact: false,
+                })
             }
         },
     })
@@ -375,6 +383,10 @@ export function useLipSync(projectId: string | null, episodeId: string | null) {
             // 请求完成后刷新数据
             if (projectId && episodeId) {
                 queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                queryClient.invalidateQueries({
+                    queryKey: queryKeys.tasks.targetStatesAll(projectId),
+                    exact: false,
+                })
             }
         }
     })

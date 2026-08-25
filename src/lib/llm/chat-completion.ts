@@ -11,6 +11,7 @@ import {
   getProviderConfig,
   getProviderKey,
 } from '../api-config'
+import { shouldFallbackFromOpenAICompatResponses } from '@/lib/model-gateway/openai-compat/common'
 import { getInternalLLMStreamCallbacks } from '../llm-observe/internal-stream-context'
 import type { ChatCompletionOptions } from './types'
 import { extractGoogleParts, extractGoogleUsage, GoogleEmptyResponseError } from './providers/google'
@@ -123,25 +124,40 @@ export async function chatCompletion(
           throw new Error(`MODEL_LLM_PROTOCOL_REQUIRED: ${selection.modelKey}`)
         }
 
-        const completion = selection.llmProtocol === 'responses'
-          ? await runOpenAICompatResponsesCompletion({
-            userId,
-            providerId: provider,
-            modelId: resolvedModelId,
-            messages,
-            temperature,
-          })
-          : await runOpenAICompatChatCompletion({
-            userId,
-            providerId: provider,
-            modelId: resolvedModelId,
-            messages,
-            temperature,
-          })
-        const completionParts = getCompletionParts(completion)
-        const compatEngine = selection.llmProtocol === 'responses'
+        let compatEngine = selection.llmProtocol === 'responses'
           ? 'openai_compat_responses'
           : 'openai_compat_chat_completions'
+        let completion: OpenAI.Chat.Completions.ChatCompletion
+        if (selection.llmProtocol === 'responses') {
+          try {
+            completion = await runOpenAICompatResponsesCompletion({
+              userId,
+              providerId: provider,
+              modelId: resolvedModelId,
+              messages,
+              temperature,
+            })
+          } catch (error) {
+            if (!shouldFallbackFromOpenAICompatResponses(error)) throw error
+            compatEngine = 'openai_compat_chat_completions_fallback'
+            completion = await runOpenAICompatChatCompletion({
+              userId,
+              providerId: provider,
+              modelId: resolvedModelId,
+              messages,
+              temperature,
+            })
+          }
+        } else {
+          completion = await runOpenAICompatChatCompletion({
+            userId,
+            providerId: provider,
+            modelId: resolvedModelId,
+            messages,
+            temperature,
+          })
+        }
+        const completionParts = getCompletionParts(completion)
         logLlmRawOutput({
           userId,
           projectId,
